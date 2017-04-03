@@ -1,8 +1,11 @@
 from bs4 import BeautifulSoup
 from nltk import word_tokenize, pos_tag
-from collections import Counter
+from collections import Counter, defaultdict
 import string
 import re
+import os
+
+from time import time
 
 PUNCTUATION_REGEXP = re.compile('[{}]'.format(re.escape(string.punctuation)))
 
@@ -14,6 +17,7 @@ class Article(object):
         self.date = ''
         self.author = ''
         self.n_words = 0
+        self.word_counter = {}
 
     def __str__(self):
         article_str = ''
@@ -54,21 +58,13 @@ class Article(object):
         if author_nodes:
             self.author = author_nodes[0].text.replace('By', '').strip()
 
-    def tokenize(self):
-        text = ' '.join(self.paragraphs)
-        words = word_tokenize(text)
-        return words
-
-    def get_top_tfidf(self, n=10):
+    def extract_word_counts(self):
         text = ' '.join(self.paragraphs)
         words = [word.lower() for word in word_tokenize(text)]
         words = [PUNCTUATION_REGEXP.sub('', word) for word in words]
         words = [word for word in words if word]
         words = [word for word, tag in pos_tag(words) if tag not in {'DT', 'IN', 'TO', 'CC'}]
-        w_counter = Counter(words)
-        # top = [(word, c / self.n_words) for word, c in w_counter.most_common(n)]
-        top = [word for word, c in w_counter.most_common(n)]
-        return top
+        self.word_counter = Counter(words)
 
 class ArticleCorpus(list):
     def __init__(self):
@@ -85,9 +81,18 @@ class ArticleCorpus(list):
             self.append(a)
             self.n_articles += 1
 
+    def add_from_folder(self, folder_path, verbose=True):
+        t1 = time()
+        file_names = os.listdir(folder_path)
+        for filename in file_names:
+            file_path = os.path.join(folder_path, filename)
+            if verbose:
+                print('Loading articles from {}'.format(file_path))
+            self.add_from_html_file(file_path)
+        t2 = time()
+        print('Done, total time: {:.3f}'.format(t2 - t1))
 
 if __name__ == '__main__':
     corpus = ArticleCorpus()
-    corpus.add_from_html_file('data/howparc.html')
-    for article in corpus:
-        print(article.get_top_tfidf(10))
+    corpus.add_from_folder('data/')
+
