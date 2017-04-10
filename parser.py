@@ -1,13 +1,32 @@
 from bs4 import BeautifulSoup
 from nltk import word_tokenize, pos_tag
 from collections import Counter, defaultdict
+import datetime
+import pickle
 import string
+import csv
 import re
 import os
 
 from time import time
 
 PUNCTUATION_REGEXP = re.compile('[{}]'.format(re.escape(string.punctuation)))
+MONTH_NUMBER = {
+    'January':    1,
+    'February':   2,
+    'March':      3,
+    'April':      4,
+    'May':        5,
+    'June':       6,
+    'July':       7,
+    'August':     8,
+    'September':  9,
+    'October':   10,
+    'November':  11,
+    'December':  12,
+}
+with open('top100en.csv', 'r') as f:
+    TOP100EN = {line.strip() for line in f}
 
 class Article(object):
     """docstring for Article"""
@@ -15,56 +34,49 @@ class Article(object):
         self.header = ''
         self.paragraphs = []
         self.date = ''
-        self.author = ''
-        self.n_words = 0
-        self.word_counter = {}
 
     def __str__(self):
         article_str = ''
         article_str += '=' * (len(self.header) + 6) + '\n'
         article_str += '   {header}   \n'.format(header=self.header)
         article_str += '=' * (len(self.header) + 6) + '\n'
-        article_str += 'author: {author}\n'.format(author=self.author)
         article_str += 'date: {date}\n'.format(date=self.date)
-        article_str += '{n_words} words\n\n'.format(n_words=self.n_words)
         for paragraph in self.paragraphs:
             article_str += '{paragraph}\n'.format(paragraph=paragraph)
         return article_str
 
     def extract_from_node(self, article_node):
-        span_nodes = [node for node in article_node.find_all('span') if node.has_attr('class')]
-        header_nodes = [node for node in span_nodes if node['class'] == ['enHeadline']]
-        if header_nodes:
-            self.header = header_nodes[0].text.strip()
+        tr_nodes = article_node.find_all('tr')
 
-        p_nodes = [node for node in article_node.find_all('p') if node.has_attr('class')]
-        paragraph_nodes = [node for node in p_nodes if 'articleParagraph' in node['class']]
-        self.paragraphs = [node.text.strip() for node in paragraph_nodes]
+        header_node = [n for n in tr_nodes if 'HD' in [b.text for b in n.find_all('b')]][0]
+        header = ' '.join(x.text for x in header_node.find_all('span'))
+        self.header = header.strip()
 
-        div_nodes = [node for node in article_node.find_all('div')]
+        lead_node = [n for n in tr_nodes if 'LP' in [b.text for b in n.find_all('b')]][0]
+        lead = [x.text for x in lead_node.find_all('p') if x.has_attr('class')]
+        text_nodes = [n for n in tr_nodes if 'TD' in [b.text for b in n.find_all('b')]]
+        if text_nodes:
+            text_node = text_nodes[0]
+            text = [x.text for x in text_node.find_all('p') if x.has_attr('class')]
+        else:
+            text = []
+        text = lead + text
+        self.paragraphs = [chunk.strip() for chunk in text]
 
-        date_matches = [re.match('^\d{1,2} \w+ \d{4}$', node.text) for node in div_nodes]
-        date_list = [m.group(0) for m in date_matches if m]
-        if date_list:
-            self.date = date_list[0]
-
-        n_word_matches = [re.search('^(\d+) words$', node.text) for node in div_nodes]
-        n_words_list = [m.group(1) for m in n_word_matches if m]
-        if n_words_list:
-            self.n_words = int(n_words_list[0])
-
-        div_nodes_class = [node for node in div_nodes if node.has_attr('class')]
-        author_nodes = [node for node in div_nodes_class if node['class'] == ['author']]
-        if author_nodes:
-            self.author = author_nodes[0].text.replace('By', '').strip()
+        date_node = [n for n in tr_nodes if 'PD' in [b.text for b in n.find_all('b')]][0]
+        date = ' '.join(x.text for x in date_node.find_all('td') if re.match('\d{1,2} [A-z]+ \d{4}', x.text))
+        day, month, year = date.split(' ')
+        month = MONTH_NUMBER[month]
+        self.date = datetime.date(int(year), month, int(day))
 
     def extract_word_counts(self):
         text = ' '.join(self.paragraphs)
+        text = re.sub('\[http\:\/\/[^\]]*\]', '', text)
         words = [word.lower() for word in word_tokenize(text)]
         words = [PUNCTUATION_REGEXP.sub('', word) for word in words]
-        words = [word for word in words if word]
-        words = [word for word, tag in pos_tag(words) if tag not in {'DT', 'IN', 'TO', 'CC'}]
-        self.word_counter = Counter(words)
+        words = [word for word in words if word and word not in TOP100EN]
+        words = [word for word, tag in pos_tag(words) if tag not in {'DT', 'IN', 'TO', 'CC', 'PRP', 'PRP$'}]
+        self.word_count = Counter(words)
 
 class ArticleCorpus(list):
     def __init__(self):
@@ -74,10 +86,14 @@ class ArticleCorpus(list):
     def add_from_html_file(self, html_file_path):
         soup = BeautifulSoup(open(html_file_path))
         div_nodes = [node for node in soup.find_all('div') if node.has_attr('class')]
-        article_nodes = [node for node in div_nodes if node['class'] == ['article']]
+        carry_node = [node for node in div_nodes if node['class'] == ['carryOverOpen']][0]
+        article_nodes = [node for node in carry_node.children
+                             if node.has_attr('id') and \
+                                node['id'].startswith('article-NYTF')]
         for article_node in article_nodes:
             a = Article()
             a.extract_from_node(article_node)
+            a.html_file_name = os.path.basename(html_file_path)
             self.append(a)
             self.n_articles += 1
 
@@ -94,5 +110,8 @@ class ArticleCorpus(list):
 
 if __name__ == '__main__':
     corpus = ArticleCorpus()
-    corpus.add_from_folder('data/')
-
+    corpus.add_from_folder('data/tagged_space_2003-2017/')
+    corpus.sort(key=lambda x: x.date)
+    for a in corpus:
+        a.extract_word_counts()
+    pickle.dump(corpus, 'nyt_space_corpus_2003-2017.pkl')
