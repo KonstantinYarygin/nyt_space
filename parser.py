@@ -110,8 +110,9 @@ class ArticleCorpus(list):
 
 if __name__ == '__main__':
     corpus = ArticleCorpus()
-    corpus.add_from_folder('data/tagged_space_2003-2017/')
+    corpus.add_from_folder('data/tagged_business_2003-2017/')
     corpus.sort(key=lambda x: x.date)
     for a in corpus:
         a.extract_word_counts()
-    pickle.dump(corpus, 'nyt_space_corpus_2003-2017.pkl')
+    with open('parsed_corpora/nyt_business_corpus_2003-2017.pkl', 'wb') as f:
+        f.write(pickle.dumps(corpus))
