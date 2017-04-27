@@ -1,6 +1,13 @@
-from bs4 import BeautifulSoup
+from nltk.stem.porter import PorterStemmer
+from nltk.stem.snowball import SnowballStemmer
 from nltk import word_tokenize, pos_tag
+from stop_words import get_stop_words
+
 from collections import Counter, defaultdict
+
+from bs4 import BeautifulSoup
+
+from time import time
 import datetime
 import pickle
 import string
@@ -8,25 +15,22 @@ import csv
 import re
 import os
 
-from time import time
-
+STEMMER = PorterStemmer()
+# STEMMER = SnowballStemmer("english")
+STOP_WORDS = [word_part for word in get_stop_words('en') for word_part in word_tokenize(word)]
 PUNCTUATION_REGEXP = re.compile('[{}]'.format(re.escape(string.punctuation)))
-MONTH_NUMBER = {
-    'January':    1,
-    'February':   2,
-    'March':      3,
-    'April':      4,
-    'May':        5,
-    'June':       6,
-    'July':       7,
-    'August':     8,
-    'September':  9,
-    'October':   10,
-    'November':  11,
-    'December':  12,
-}
-with open('top100en.csv', 'r') as f:
-    TOP100EN = {line.strip() for line in f}
+MONTH_NUMBER = {'January':    1,
+                'February':   2,
+                'March':      3,
+                'April':      4,
+                'May':        5,
+                'June':       6,
+                'July':       7,
+                'August':     8,
+                'September':  9,
+                'October':   10,
+                'November':  11,
+                'December':  12}
 
 class Article(object):
     """docstring for Article"""
@@ -71,11 +75,19 @@ class Article(object):
 
     def extract_word_counts(self):
         text = ' '.join(self.paragraphs)
+        # delete url links
         text = re.sub('\[http\:\/\/[^\]]*\]', '', text)
+        # lower uppercase
         words = [word.lower() for word in word_tokenize(text)]
+        # delete puncluation
         words = [PUNCTUATION_REGEXP.sub('', word) for word in words]
-        words = [word for word in words if word and word not in TOP100EN]
+        words = [word for word in words if word]
+        # delete junk words
+        words = [word for word in words if word not in STOP_WORDS]
+        # delete junk part of speech
         words = [word for word, tag in pos_tag(words) if tag not in {'DT', 'IN', 'TO', 'CC', 'PRP', 'PRP$'}]
+        # stem words
+        words = [STEMMER.stem(word) for word in words]
         self.word_count = Counter(words)
 
 class ArticleCorpus(list):
@@ -106,13 +118,22 @@ class ArticleCorpus(list):
                 print('Loading articles from {}'.format(file_path))
             self.add_from_html_file(file_path)
         t2 = time()
-        print('Done, total time: {:.3f}'.format(t2 - t1))
+        if verbose:
+            print('Done, total time: {:.3f}'.format(t2 - t1))
 
 if __name__ == '__main__':
+    corpus = ArticleCorpus()
+    corpus.add_from_folder('data/tagged_space_2003-2017/')
+    corpus.sort(key=lambda x: x.date)
+    for a in corpus:
+        a.extract_word_counts()
+    with open('corpora_parsed/nyt_space_corpus_2003-2017.pkl', 'wb') as f:
+        f.write(pickle.dumps(corpus))
+
     corpus = ArticleCorpus()
     corpus.add_from_folder('data/tagged_business_2003-2017/')
     corpus.sort(key=lambda x: x.date)
     for a in corpus:
         a.extract_word_counts()
-    with open('parsed_corpora/nyt_business_corpus_2003-2017.pkl', 'wb') as f:
+    with open('corpora_parsed/nyt_business_corpus_2003-2017.pkl', 'wb') as f:
         f.write(pickle.dumps(corpus))
